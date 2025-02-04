@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+    <meta charset="UTF-8">
+    <title>عداد نقاط الدومينو</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            padding: 20px;
+            background-color: #f0f0f0;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+
+        input[type="file"] {
+            margin: 20px;
+            padding: 10px;
+            border: 2px dashed #3498db;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        #result {
+            font-size: 24px;
+            color: #2ecc71;
+            margin-top: 20px;
+            padding: 10px;
+        }
+
+        canvas {
+            display: block;
+            margin: 20px auto;
+            border: 1px solid #ddd;
+            max-width: 500px;
+            max-height: 500px;
+        }
+    </style>
+    <script async src="https://docs.opencv.org/4.5.0/opencv.js"></script>
+</head>
+<body>
+    <div class="container">
+        <h1>عداد نقاط الدومينو ⚅</h1>
+        <input type="file" id="imageInput" accept="image/*" disabled>
+        <canvas id="canvas"></canvas>
+        <div id="result">جارٍ تحميل المكتبة...</div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const elements = {
+                imageInput: document.getElementById('imageInput'),
+                canvas: document.getElementById('canvas'),
+                resultDiv: document.getElementById('result')
+            };
+
+            const countPips = (section, ctx, offsetX, offsetY) => {
+                const circles = new cv.Mat();
+                cv.HoughCircles(
+                    section,
+                    circles,
+                    cv.HOUGH_GRADIENT,
+                    1,
+                    10,
+                    50,
+                    20,
+                    5, 20
+                );
+
+                ctx.strokeStyle = "red";
+                ctx.lineWidth = 2;
+
+                for (let i = 0; i < circles.rows; i++) {
+                    let x = circles.data32F[i * 3] + offsetX;
+                    let y = circles.data32F[i * 3 + 1] + offsetY;
+                    let r = circles.data32F[i * 3 + 2];
+
+                    ctx.beginPath();
+                    ctx.arc(x, y, r, 0, 2 * Math.PI);
+                    ctx.stroke();
+                }
+
+                const count = circles.rows;
+                circles.delete();
+                return count;
+            };
+
+            const processImage = (img) => {
+                try {
+                    const ctx = elements.canvas.getContext('2d', { willReadFrequently: true });
+                    const scaleFactor = Math.min(500 / img.width, 500 / img.height);
+                    elements.canvas.width = img.width * scaleFactor;
+                    elements.canvas.height = img.height * scaleFactor;
+                    ctx.drawImage(img, 0, 0, elements.canvas.width, elements.canvas.height);
+
+                    const src = cv.imread(elements.canvas);
+                    const gray = new cv.Mat();
+                    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+
+                    cv.medianBlur(gray, gray, 5);
+                    const binary = new cv.Mat();
+                    cv.adaptiveThreshold(gray, binary, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY_INV, 11, 2);
+
+                    const contours = new cv.MatVector();
+                    const hierarchy = new cv.Mat();
+                    cv.findContours(binary, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+
+                    let totalPoints = 0;
+                    for (let i = 0; i < contours.size(); i++) {
+                        const rect = cv.boundingRect(contours.get(i));
+                        const roi = gray.roi(rect);
+                        totalPoints += countPips(roi, ctx, rect.x, rect.y);
+                        roi.delete();
+                    }
+
+                    elements.resultDiv.textContent = `النقاط الإجمالية: ${totalPoints}`;
+                    [src, gray, binary, contours, hierarchy].forEach(m => m.delete());
+                } catch (error) {
+                    elements.resultDiv.textContent = 'حدث خطأ أثناء المعالجة';
+                    console.error('Error:', error);
+                }
+            };
+
+            const initOpenCV = () => {
+                const checkCV = setInterval(() => {
+                    if (typeof cv !== 'undefined' && cv.getBuildInformation) {
+                        clearInterval(checkCV);
+                        elements.resultDiv.textContent = 'جاهز لتحميل الصور';
+                        elements.imageInput.disabled = false;
+                        elements.imageInput.addEventListener('change', handleImageUpload);
+                    }
+                }, 100);
+            };
+
+            const handleImageUpload = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                elements.resultDiv.textContent = 'جارٍ معالجة الصورة...';
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = new Image();
+                    img.onload = () => processImage(img);
+                    img.onerror = () => elements.resultDiv.textContent = 'خطأ في تحميل الصورة';
+                    img.src = e.target.result;
+                };
+                reader.readAsDataURL(file);
+            };
+
+            initOpenCV();
+        });
+    </script>
+</body>
+</html>
